@@ -1,0 +1,91 @@
+1.import os  
+2.import pandas as pd  
+3.  
+4.# Constants  
+5.INTEREST_RATE = 0.01  
+6.NUM_CATEGORIES = 10  
+7.NUM_SUBSTANCES = 21  
+8.WORK_DIRECTORY = 'work_directory'  
+9.BACKEND_DATA_PATH = 'models\后台数据.xlsx'  
+10.  
+11.def create_folder(folder_path):  
+12.    if not os.path.exists(folder_path):  
+13.        os.makedirs(folder_path)  
+14.  
+15.def save_to_excel(dataframe, folder_path, filename):  
+16.    create_folder(folder_path)  
+17.    filepath = os.path.join(folder_path, filename)  
+18.    dataframe.to_excel(filepath, index=False)  
+19.  
+20.def sum_by_columns(df, groupby_column, target_column):  
+21.    return df.groupby(groupby_column)[target_column].sum().reset_index()  
+22.  
+23.# Read data  
+24.raw_df = pd.read_excel('D:\MBRLCA\models\五布河特大桥.xlsx', sheet_name='Sheet3')  
+25.bridge_name = raw_df.loc[1, '代号'][6:]  
+26.folder_path = os.path.join(WORK_DIRECTORY, bridge_name)  
+27.  
+28.# Clean data and save to Excel  
+29.total_mask = raw_df['数量'] == '合计'  
+30.total_rows = raw_df[total_mask].index  
+31.cleaned_data = pd.DataFrame(columns=['时间节点', '时间系数', '...' 'LCC总量'])  
+32.for row in total_rows:  
+33.    temp_data = raw_df.loc[row + 4:row + 22, ['代号', '...' '数量', 'LCC总量']]  
+34.    temp_data['分项编号'] = raw_df.loc[row - 3, '代号'][5:]  
+35.    temp_data['工程名称'] = raw_df.loc[row - 3, '工程名称'][5:]  
+36.    temp_data['时间节点'] = 0 if pd.isnull(raw_df.loc[row + 1, '数量']) else raw_df.loc[row + 1, '数量']  
+37.    temp_data['时间系数'] = (1 + INTEREST_RATE) ** temp_data['时间节点']  
+38.    cleaned_data = pd.concat([cleaned_data, temp_data], ignore_index=True)  
+39.cleaned_data = cleaned_data.dropna(subset=['代号'], axis=0)  
+40.save_to_excel(cleaned_data, folder_path, 'cleaned_data.xlsx')  
+41.  
+42.# Merge and process data  
+43.id_df = pd.read_excel(BACKEND_DATA_PATH, sheet_name='代号转换表')  
+44.buwei_df = pd.read_excel(BACKEND_DATA_PATH, sheet_name='工程部位转化表')  
+45.list_df = pd.read_excel(BACKEND_DATA_PATH, sheet_name='清单表')  
+46.cleaned_df = pd.read_excel(os.path.join(WORK_DIRECTORY, 'cleaned_data.xlsx'), sheet_name='Sheet1')  
+47.merged_df = pd.merge(id_df, cleaned_df, on='代号', how='right').dropna(subset=['转换代号'], axis=0)  
+48.merged_df['LCA数量'] = merged_df['数量'] * merged_df['单位系数']  
+49.merged_df = pd.merge(buwei_df, merged_df, on='分项编号', how='right')  
+50.merged_list_df = pd.merge(merged_df, list_df, on='转换代号', how='left')  
+51.  
+52.# Calculate quantities  
+53.last_n_cols = merged_list_df.iloc[:, -NUM_SUBSTANCES:]  
+54.quantities = merged_list_df['LCA数量']  
+55.multiplied_cols = last_n_cols.multiply(quantities, axis=0)  
+56.merged_list_df = pd.concat([merged_list_df, multiplied_cols], axis=1)  
+57.  
+58.# Feature engineering  
+59.cols_to_multiply = merged_list_df.iloc[:, -NUM_SUBSTANCES:]  
+60.feature_df = pd.read_excel(BACKEND_DATA_PATH, sheet_name='特征表')  
+61.feature_names = feature_df.iloc[0, :].tolist()  
+62.substance_factors = feature_df.iloc[1:NUM_SUBSTANCES + 1, :]  
+63.result = pd.DataFrame(cols_to_multiply.to_numpy().dot(substance_factors.to_numpy()), columns=feature_names)  
+64.merged_list_df_with_features = pd.concat([merged_list_df, result], axis=1)  
+65.  
+66.# Calculate weights  
+67.cols_to_multiply = merged_list_df_with_features.iloc[:, -NUM_SUBSTANCES:]  
+68.weights_df = pd.read_excel(BACKEND_DATA_PATH, sheet_name='权重表')  
+69.new_column_names = [str(x) + ' 货币化值' for x in feature_df.iloc[0, :].tolist()]  
+70.weight_factors = weights_df.iloc[1:NUM_SUBSTANCES + 1, :]  
+71.result = pd.DataFrame(cols_multiply.to_numpy().dot(weight_factors.to_numpy()), columns=new_column_names) 	merged_list_df_with_weights = pd.concat([merged_list_df_with_features, result], axis=1)  
+72.  
+73.# Time adjustments  
+74.last_m_cols = merged_list_df_with_weights.iloc[:, -NUM_CATEGORIES:]  
+75.time_coef_col = merged_list_df_with_weights['时间系数']  
+76.multiplied_cols = last_m_cols.multiply(time_coef_col, axis=0)  
+77.new_column_names = [name + '(t)' for name in last_m_cols]  
+78.total_amount_col = merged_list_df_with_weights['LCC总量'] * time_coef_col  
+79.merged_list_with_time_adjustments = pd.concat([merged_list_df_with_weights, multiplied_cols, total_amount_col], axis=1)  
+80.merged_list_with_time_adjustments.columns = list(merged_list_df_with_weights.columns) + new_column_names + ['LCC总量(t)']  
+81.file_name = 'merged_list_with_time_adjustments.xlsx'  
+82.save_to_excel(merged_list_with_time_adjustments, folder_path, file_name)  
+83.  
+84.# Aggregate data  
+85.df = pd.DataFrame(merged_list_with_time_adjustments)  
+86.groupby_column = '阶段名称'  
+87.column_names = ['全球变暖 货币化值(t)', '酸化 货币化值(t)', '...''LCC总量(t)']  
+88.dataframes = [sum_by_columns(df, groupby_column, col) for col in column_names]  
+89.sum_by = pd.concat(dataframes, axis=1, join='inner')  
+90.file_name = 'sum_by.xlsx'  
+91.save_to_excel(sum_by, folder_path, file_name)  
