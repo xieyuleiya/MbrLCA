@@ -1,0 +1,32 @@
+1.import sys  
+2.import os  
+3.from PyQt5.QtWidgets import QApplication  
+4.from loguru import logger  
+5.from utils import global_var as gl, logs  
+6.from utils.connect_mysql import db  
+7.from win.login_form import login_form  
+8.  
+9.os.chdir(os.path.dirname(__file__))  
+10.sys.path.append(os.path.dirname(os.path.abspath(__file__)))  
+11.  
+12.  
+13.class App(QApplication):  
+14.    def __init__(self):  
+15.        super().__init__(sys.argv)  
+16.        self.windows = {}  
+17.  
+18.    def run(self, pytest=False):  
+19.        logger.info("程序启动 ...")  
+20.        from win.main_win import main_win  
+21.        self.windows["main"] = main_win()  
+22.        self.windows["login"] = login_form(self.windows["main"])  
+23.        self.windows["login"].show()  
+24.        if not pytest:  
+25.            sys.exit(self.exec_())  
+26.  
+27.  
+28.if __name__ == "__main__":  
+29.    logs.setting()  
+30.    gl.__init()  
+31.    db.connect()  
+32.    App().run()  
